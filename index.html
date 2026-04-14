@@ -112,6 +112,7 @@
       <button class="action-btn" id="undo">undo</button>
       <button class="action-btn" id="clear">clear</button>
       <button class="action-btn copy-btn" id="copy">copy</button>
+      <button class="action-btn copy-btn" id="paste">paste</button>
       <button class="action-btn" id="zack" style="background:#2d2d5a;border-color:#3a3a7a;">zack</button>
     </div>
   </div>
@@ -273,6 +274,35 @@ document.getElementById('copy').onclick = async () => {
     toast('copied - paste it in discord');
   } catch (err) {
     toast('copy failed - try from localhost or https');
+  }
+};
+
+// paste button (for mobile - no keyboard paste event)
+document.getElementById('paste').onclick = async () => {
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const imageType = item.types.find(t => t.startsWith('image/'));
+      if (imageType) {
+        const blob = await item.getType(imageType);
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(canvas.width / img.width, canvas.height / img.height, 1);
+          const w = img.width * scale;
+          const h = img.height * scale;
+          const x = (canvas.width - w) / 2;
+          const y = (canvas.height - h) / 2;
+          ctx.drawImage(img, x, y, w, h);
+          saveState();
+          URL.revokeObjectURL(img.src);
+        };
+        img.src = URL.createObjectURL(blob);
+        return;
+      }
+    }
+    toast('no image in clipboard');
+  } catch (err) {
+    toast('paste failed - allow clipboard access');
   }
 };
 
