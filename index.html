@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>scriblord</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: monospace;
+    color: #ccc;
+    user-select: none;
+  }
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  h1 {
+    font-size: 14px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: #666;
+  }
+  canvas {
+    background: #fff;
+    cursor: crosshair;
+    border-radius: 3px;
+    touch-action: none;
+  }
+  .toolbar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 310px;
+  }
+  .colors { display: flex; gap: 4px; }
+  .color-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid #333;
+    cursor: pointer;
+    transition: border-color 0.1s;
+  }
+  .color-btn.active { border-color: #fff; }
+  .sep {
+    width: 1px;
+    height: 20px;
+    background: #333;
+    margin: 0 2px;
+  }
+  .sizes { display: flex; gap: 4px; align-items: center; }
+  .size-btn {
+    background: #ccc;
+    border-radius: 50%;
+    border: 2px solid #333;
+    cursor: pointer;
+    transition: border-color 0.1s;
+  }
+  .size-btn.active { border-color: #fff; }
+  .actions { display: flex; gap: 4px; }
+  button.action-btn {
+    background: #333;
+    color: #ccc;
+    border: 1px solid #444;
+    padding: 4px 10px;
+    font-family: monospace;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: background 0.1s;
+  }
+  button.action-btn:hover { background: #444; }
+  button.action-btn.copy-btn { background: #2d5a2d; border-color: #3a7a3a; }
+  button.action-btn.copy-btn:hover { background: #3a7a3a; }
+  .toast {
+    position: fixed;
+    top: 20px;
+    background: #2d5a2d;
+    color: #afd6af;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>scriblord</h1>
+  <canvas id="canvas" width="300" height="300"></canvas>
+  <div class="toolbar">
+    <div class="colors" id="colors"></div>
+    <div class="sep"></div>
+    <div class="sizes" id="sizes"></div>
+    <div class="sep"></div>
+    <div class="actions">
+      <button class="action-btn" id="undo">undo</button>
+      <button class="action-btn" id="clear">clear</button>
+      <button class="action-btn copy-btn" id="copy">copy</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const COLORS = ['#000000','#ff4444','#4488ff','#44bb44','#ffaa00','#aa44ff','#ffffff'];
+const SIZES = [3, 6, 12];
+
+let color = COLORS[0];
+let size = SIZES[0];
+let drawing = false;
+let lastX, lastY;
+let history = [];
+
+// save initial blank state
+saveState();
+
+// build color buttons
+const colorsEl = document.getElementById('colors');
+COLORS.forEach((c, i) => {
+  const btn = document.createElement('div');
+  btn.className = 'color-btn' + (i === 0 ? ' active' : '');
+  btn.style.background = c;
+  if (c === '#ffffff') btn.style.border = '2px solid #666';
+  btn.onclick = () => {
+    color = c;
+    colorsEl.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    sizesEl.querySelectorAll('.size-btn').forEach(b => b.style.background = c);
+  };
+  colorsEl.appendChild(btn);
+});
+
+// build size buttons
+const sizesEl = document.getElementById('sizes');
+SIZES.forEach((s, i) => {
+  const btn = document.createElement('div');
+  btn.className = 'size-btn' + (i === 0 ? ' active' : '');
+  btn.style.width = (s + 10) + 'px';
+  btn.style.height = (s + 10) + 'px';
+  btn.style.background = color;
+  btn.onclick = () => {
+    size = s;
+    sizesEl.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  };
+  sizesEl.appendChild(btn);
+});
+
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  if (e.touches) {
+    return [
+      (e.touches[0].clientX - rect.left) * scaleX,
+      (e.touches[0].clientY - rect.top) * scaleY
+    ];
+  }
+  return [
+    (e.clientX - rect.left) * scaleX,
+    (e.clientY - rect.top) * scaleY
+  ];
+}
+
+function drawLine(x1, y1, x2, y2) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = size;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+}
+
+function drawDot(x, y) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function startDraw(e) {
+  e.preventDefault();
+  drawing = true;
+  [lastX, lastY] = getPos(e);
+  drawDot(lastX, lastY);
+}
+
+function moveDraw(e) {
+  if (!drawing) return;
+  e.preventDefault();
+  const [x, y] = getPos(e);
+  drawLine(lastX, lastY, x, y);
+  lastX = x;
+  lastY = y;
+}
+
+function endDraw(e) {
+  if (!drawing) return;
+  drawing = false;
+  saveState();
+}
+
+canvas.addEventListener('mousedown', startDraw);
+canvas.addEventListener('mousemove', moveDraw);
+canvas.addEventListener('mouseup', endDraw);
+canvas.addEventListener('mouseleave', endDraw);
+canvas.addEventListener('touchstart', startDraw, { passive: false });
+canvas.addEventListener('touchmove', moveDraw, { passive: false });
+canvas.addEventListener('touchend', endDraw);
+
+function saveState() {
+  if (history.length > 50) history.shift();
+  history.push(canvas.toDataURL());
+}
+
+document.getElementById('undo').onclick = () => {
+  if (history.length <= 1) return;
+  history.pop();
+  const img = new Image();
+  img.onload = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+  };
+  img.src = history[history.length - 1];
+};
+
+document.getElementById('clear').onclick = () => {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  saveState();
+};
+
+// fill white initially
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1500);
+}
+
+document.getElementById('copy').onclick = async () => {
+  try {
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': blob })
+    ]);
+    toast('copied - paste it in discord');
+  } catch (err) {
+    toast('copy failed - try from localhost or https');
+  }
+};
+
+// ctrl+z for undo, ctrl+c when canvas focused for copy
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    document.getElementById('undo').click();
+  }
+});
+</script>
+</body>
+</html>
